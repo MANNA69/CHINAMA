@@ -100,30 +100,110 @@ copyBtn.onclick = () => {
 
   masterWs.onmessage = (msg) => {
     const data = JSON.parse(msg.data);
-
     if (data.msg_type === 'authorize') {
-      masterWs.send(JSON.stringify({ transaction: 1, subscribe: 1 }));
+      masterWs.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 }));
     }
-
-    if (data.msg_type === 'transaction' && data.transaction.action === 'buy') {
-      const masterTrade = data.transaction;
-
-      const mirroredBuy = {
-        buy: 1,
-        price: masterTrade.amount,
-        parameters: {
-          amount: masterTrade.amount,
-          basis: 'stake',
-          contract_type: masterTrade.contract_type,
-          currency: masterTrade.currency,
-          duration: 1,
-          duration_unit: 't',
-          symbol: masterTrade.symbol
-        }
-      };
-
-      ws.send(JSON.stringify(mirroredBuy));
-      copyStatus.textContent = `✅ Mirrored buy: ${masterTrade.contract_type} on ${masterTrade.symbol}`;
+    if (data.msg_type === 'proposal_open_contract') {
+      console.log('Master contract update:', data);
+      // Future: Replicate trades based on contract details
     }
   };
 };
+const app_id = 72324;
+const redirect_uri = 'https://deriv.com/';
+const ws = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=' + app_id);
+
+let token = '';
+let active_symbols = [];
+
+function login() {
+  window.location.href = `https://oauth.deriv.com/oauth2/authorize?app_id=${app_id}&redirect_uri=${redirect_uri}`;
+}
+
+function parseTokenFromURL() {
+  const url = new URL(window.location.href);
+  token = url.searchParams.get("token1");
+  if (token) {
+    authorize();
+  }
+}
+
+function authorize() {
+  ws.send(JSON.stringify({ authorize: token }));
+}
+
+ws.onmessage = function (msg) {
+  const data = JSON.parse(msg.data);
+
+  if (data.msg_type === 'authorize') {
+    document.querySelector('#account-info').classList.remove('hidden');
+    document.querySelector('#account-info').innerHTML = `
+      <strong>Account:</strong> ${data.authorize.loginid}<br>
+      <strong>Balance:</strong> ${data.authorize.balance} ${data.authorize.currency}
+    `;
+    getActiveSymbols();
+  }
+
+  if (data.msg_type === 'active_symbols') {
+    active_symbols = data.active_symbols;
+    const select = document.querySelector('#symbol-select');
+    select.innerHTML = '';
+    active_symbols.forEach(s => {
+      const option = document.createElement('option');
+      option.value = s.symbol;
+      option.text = `${s.display_name}`;
+      select.appendChild(option);
+    });
+    document.querySelector('#symbol-select').classList.remove('hidden');
+    document.querySelector('#contract-type').classList.remove('hidden');
+    document.querySelector('#amount').classList.remove('hidden');
+    document.querySelector('#buy-button').classList.remove('hidden');
+    document.querySelector('#active-symbols').classList.remove('hidden');
+    listSymbols();
+  }
+
+  if (data.msg_type === 'buy') {
+    document.querySelector('#buy-result').textContent = `✔ Contract Purchased! ID: ${data.buy.contract_id}`;
+  }
+};
+
+function getActiveSymbols() {
+  ws.send(JSON.stringify({
+    active_symbols: 'brief',
+    product_type: 'basic'
+  }));
+}
+
+function listSymbols() {
+  const list = active_symbols.map(s => s.display_name).join(', ');
+  document.querySelector('#active-symbols').textContent = `Active Symbols: ${list}`;
+}
+
+function buyContract() {
+  const symbol = document.querySelector('#symbol-select').value;
+  const contractType = document.querySelector('#contract-type').value;
+  const amount = parseFloat(document.querySelector('#amount').value);
+
+  if (!amount || amount <= 0) {
+    alert('Please enter a valid amount.');
+    return;
+  }
+
+  const proposal = {
+    buy: 1,
+    price: amount,
+    parameters: {
+      amount,
+      basis: 'stake',
+      contract_type: contractType,
+      currency: 'USD',
+      duration: 1,
+      duration_unit: 't',
+      symbol
+    }
+  };
+
+  ws.send(JSON.stringify(proposal));
+}
+
+parseTokenFromURL();
