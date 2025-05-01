@@ -1,50 +1,98 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Deriv Trading App</title>
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <!-- Top-right image logo -->
-  <img src="MANNA.jpg" alt="Manna Logo" class="logo-top-right">
+const app_id = 72324;
+const redirect_uri = 'https://deriv.com/';
+const ws = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=' + app_id);
 
-  <div class="container">
-    <!-- Centered MANNA text -->
-    <div class="manna-logo">MANNA</div>
+let token = '';
+let active_symbols = [];
 
-    <button id="login-btn">Login with Deriv</button>
+function login() {
+  window.location.href = `https://oauth.deriv.com/oauth2/authorize?app_id=${app_id}&redirect_uri=${redirect_uri}`;
+}
 
-    <div id="user-info" class="hidden">
-      Logged in as: <span id="user-name"></span>
-    </div>
+function parseTokenFromURL() {
+  const url = new URL(window.location.href);
+  token = url.searchParams.get("token1");
+  if (token) {
+    authorize();
+  }
+}
 
-    <div id="contract-form" class="hidden">
-      <h3>Buy Contract</h3>
-      <select id="symbol-dropdown"></select>
-      <select id="contract-type">
-        <option value="CALL">Rise</option>
-        <option value="PUT">Fall</option>
-        <option value="DIGITOVER">Digit Over</option>
-        <option value="DIGITUNDER">Digit Under</option>
-        <option value="DIGITMATCH">Digit Match</option>
-        <option value="DIGITDIFF">Digit Differs</option>
-        <option value="DIGITEVEN">Digit Even</option>
-        <option value="DIGITODD">Digit Odd</option>
-      </select>
-      <input type="number" id="stake" placeholder="Stake amount">
-      <button id="buy-contract">Buy</button>
-      <div id="buy-result"></div>
-    </div>
+function authorize() {
+  ws.send(JSON.stringify({ authorize: token }));
+}
 
-    <div id="copy-trading" class="hidden">
-      <h3>Copy Trading</h3>
-      <input type="text" id="master-token" placeholder="Master account token">
-      <button id="start-copy">Start Copying</button>
-      <div id="copy-status"></div>
-    </div>
-  </div>
+ws.onmessage = function (msg) {
+  const data = JSON.parse(msg.data);
 
-  <script src="script.js"></script>
-</body>
-</html>
+  if (data.msg_type === 'authorize') {
+    document.querySelector('#account-info').classList.remove('hidden');
+    document.querySelector('#account-info').innerHTML = `
+      <strong>Account:</strong> ${data.authorize.loginid}<br>
+      <strong>Balance:</strong> ${data.authorize.balance} ${data.authorize.currency}
+    `;
+    getActiveSymbols();
+  }
+
+  if (data.msg_type === 'active_symbols') {
+    active_symbols = data.active_symbols;
+    const select = document.querySelector('#symbol-select');
+    select.innerHTML = '';
+    active_symbols.forEach(s => {
+      const option = document.createElement('option');
+      option.value = s.symbol;
+      option.text = `${s.display_name}`;
+      select.appendChild(option);
+    });
+    document.querySelector('#symbol-select').classList.remove('hidden');
+    document.querySelector('#contract-type').classList.remove('hidden');
+    document.querySelector('#amount').classList.remove('hidden');
+    document.querySelector('#buy-button').classList.remove('hidden');
+    document.querySelector('#active-symbols').classList.remove('hidden');
+    listSymbols();
+  }
+
+  if (data.msg_type === 'buy') {
+    document.querySelector('#buy-result').textContent = `✔ Contract Purchased! ID: ${data.buy.contract_id}`;
+  }
+};
+
+function getActiveSymbols() {
+  ws.send(JSON.stringify({
+    active_symbols: 'brief',
+    product_type: 'basic'
+  }));
+}
+
+function listSymbols() {
+  const list = active_symbols.map(s => s.display_name).join(', ');
+  document.querySelector('#active-symbols').textContent = `Active Symbols: ${list}`;
+}
+
+function buyContract() {
+  const symbol = document.querySelector('#symbol-select').value;
+  const contractType = document.querySelector('#contract-type').value;
+  const amount = parseFloat(document.querySelector('#amount').value);
+
+  if (!amount || amount <= 0) {
+    alert('Please enter a valid amount.');
+    return;
+  }
+
+  const proposal = {
+    buy: 1,
+    price: amount,
+    parameters: {
+      amount,
+      basis: 'stake',
+      contract_type: contractType,
+      currency: 'USD',
+      duration: 1,
+      duration_unit: 't',
+      symbol
+    }
+  };
+
+  ws.send(JSON.stringify(proposal));
+}
+
+parseTokenFromURL();
